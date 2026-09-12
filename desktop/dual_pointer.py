@@ -7,16 +7,32 @@ import sys
 import os
 import time
 from typing import Optional
+
+# Ensure repository root is on sys.path so it can be run from any working directory
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 from PIL import Image, ImageDraw
 
-from desktop.config import DualPointerConfig
-from desktop.cursor_manager import (
-    CursorManager,
-    get_physical_cursor_pos,
-    get_default_virtual_screen_bounds,
-)
-from desktop.ghost_overlay import GhostOverlay
-from desktop.hotkey_manager import HotkeyManager
+try:
+    from desktop.config import DualPointerConfig
+    from desktop.cursor_manager import (
+        CursorManager,
+        get_physical_cursor_pos,
+        get_default_virtual_screen_bounds,
+    )
+    from desktop.ghost_overlay import GhostOverlay
+    from desktop.hotkey_manager import HotkeyManager
+except ImportError:
+    from config import DualPointerConfig
+    from cursor_manager import (
+        CursorManager,
+        get_physical_cursor_pos,
+        get_default_virtual_screen_bounds,
+    )
+    from ghost_overlay import GhostOverlay
+    from hotkey_manager import HotkeyManager
 
 CONFIG_FILE = os.path.expanduser("~/.dualpointer_config.json")
 
