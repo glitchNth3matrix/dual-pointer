@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Hover Lock
 // @namespace    https://github.com/dualpointer/youtube-hover-lock
-// @version      1.0.0
+// @version      1.1.0
 // @description  Keeps YouTube thumbnail video previews actively playing when moving mouse away or switching monitors.
 // @author       DualPointer
 // @match        *://*.youtube.com/*
@@ -66,6 +66,7 @@
   let lockedCard = null;
   let lockBadge = null;
   let videoResumeInterval = null;
+  let autoLockTimer = null;
 
   const CARD_SELECTORS = [
     'ytd-rich-item-renderer',
@@ -81,23 +82,29 @@
     return target.closest(CARD_SELECTORS.join(', '));
   }
 
-  document.addEventListener('pointerover', (e) => {
+  function onPointerEnter(e) {
     const card = findParentVideoCard(e.target);
-    if (card) hoveredCard = card;
-  }, true);
+    if (card && card !== hoveredCard) {
+      hoveredCard = card;
 
-  document.addEventListener('mouseover', (e) => {
-    const card = findParentVideoCard(e.target);
-    if (card) hoveredCard = card;
-  }, true);
+      if (autoLockTimer) clearTimeout(autoLockTimer);
+      autoLockTimer = setTimeout(() => {
+        if (hoveredCard === card && lockedCard !== card) {
+          lockPreview(card);
+        }
+      }, 700);
+    }
+  }
+
+  document.addEventListener('pointerover', onPointerEnter, true);
+  document.addEventListener('mouseover', onPointerEnter, true);
 
   function handleLeaveEvent(e) {
     if (!lockedCard) return;
     if (
       lockedCard.contains(e.target) ||
       e.target === lockedCard ||
-      e.target.closest('#video-preview') ||
-      e.target.closest('ytd-video-preview')
+      (e.target.closest && (e.target.closest('#video-preview') || e.target.closest('ytd-video-preview')))
     ) {
       e.stopImmediatePropagation();
       e.stopPropagation();
@@ -115,7 +122,7 @@
     const previewContainer =
       document.querySelector('#video-preview') ||
       document.querySelector('ytd-video-preview') ||
-      lockedCard.querySelector('ytd-video-preview');
+      (lockedCard.querySelector && lockedCard.querySelector('ytd-video-preview'));
 
     if (previewContainer) {
       const video = previewContainer.querySelector('video');
@@ -126,8 +133,9 @@
   }
 
   function lockPreview(card) {
+    if (!card || lockedCard === card) return;
     unlockPreview();
-    if (!card) return;
+
     lockedCard = card;
     lockedCard.classList.add('yt-hover-locked-card');
 
@@ -135,7 +143,7 @@
     lockBadge.className = 'yt-hover-lock-badge';
     lockBadge.innerHTML = `
       <span class="yt-hover-lock-icon"></span>
-      <span>Locked (Alt+P to unlock)</span>
+      <span>Preview Locked</span>
     `;
     lockBadge.title = 'Click to release preview lock';
     lockBadge.addEventListener('click', (e) => {
@@ -154,10 +162,14 @@
     }
 
     if (videoResumeInterval) clearInterval(videoResumeInterval);
-    videoResumeInterval = setInterval(ensureVideoPlaying, 500);
+    videoResumeInterval = setInterval(ensureVideoPlaying, 400);
   }
 
   function unlockPreview() {
+    if (autoLockTimer) {
+      clearTimeout(autoLockTimer);
+      autoLockTimer = null;
+    }
     if (videoResumeInterval) {
       clearInterval(videoResumeInterval);
       videoResumeInterval = null;
@@ -195,5 +207,5 @@
     true
   );
 
-  console.log('[YouTube Hover Lock] Userscript loaded. Press Alt+P over video to lock preview.');
+  console.log('[YouTube Hover Lock] Userscript loaded with Auto-Lock.');
 })();

@@ -139,6 +139,11 @@ class DualPointerApp:
             key=self.config.hotkey_key,
         )
 
+        # Display ghost cursor at the inactive slot position immediately on launch
+        if self.config.ghost_cursor_enabled:
+            parked = self.cursor_manager.inactive_slot_pos
+            self.ghost_overlay.show(parked[0], parked[1], slot_num=self.cursor_manager.inactive_slot)
+
         try:
             import pystray
             from pystray import MenuItem as item
