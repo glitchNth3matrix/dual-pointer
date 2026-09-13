@@ -1,72 +1,128 @@
 // ==UserScript==
 // @name         YouTube Hover Lock
 // @namespace    https://github.com/dualpointer/youtube-hover-lock
-// @version      1.1.0
-// @description  Keeps YouTube thumbnail video previews actively playing when moving mouse away or switching monitors.
+// @version      1.2.0
+// @description  Keeps YouTube thumbnail video previews actively playing when moving mouse away, switching monitors, or clicking elsewhere.
 // @author       DualPointer
 // @match        *://*.youtube.com/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  // Inject Styles
-  const style = document.createElement('style');
-  style.textContent = `
-    .yt-hover-lock-badge {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      z-index: 2200;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      font-family: Roboto, Arial, sans-serif;
-      font-size: 11px;
-      font-weight: 500;
-      color: #ffffff;
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid rgba(56, 189, 248, 0.6);
-      border-radius: 6px;
-      backdrop-filter: blur(8px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-      pointer-events: auto;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      user-select: none;
-    }
-    .yt-hover-lock-badge:hover {
-      background: rgba(220, 38, 38, 0.9);
-      border-color: rgba(252, 165, 165, 0.8);
-    }
-    .yt-hover-lock-icon {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      background-color: #38bdf8;
-      border-radius: 50%;
-      box-shadow: 0 0 8px #38bdf8;
-      animation: yt-pulse 1.8s infinite;
-    }
-    @keyframes yt-pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.5; transform: scale(0.85); }
-    }
-    .yt-hover-locked-card {
-      outline: 2px solid rgba(56, 189, 248, 0.7) !important;
-      outline-offset: -2px;
-    }
-  `;
-  document.head.appendChild(style);
+  window.__YT_HOVER_LOCK_LOCKED__ = false;
 
   let hoveredCard = null;
   let lockedCard = null;
+  let lockedPreviewElement = null;
   let lockBadge = null;
-  let videoResumeInterval = null;
   let autoLockTimer = null;
+  let heartbeatTimer = null;
+  let domObserver = null;
+
+  function injectStyles() {
+    if (document.getElementById('yt-hover-lock-css')) return;
+    const style = document.createElement('style');
+    style.id = 'yt-hover-lock-css';
+    style.textContent = `
+      .yt-hover-lock-badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 2200;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        font-family: Roboto, Arial, sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        color: #ffffff;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(56, 189, 248, 0.7);
+        border-radius: 6px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        pointer-events: auto;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        user-select: none;
+      }
+      .yt-hover-lock-badge:hover {
+        background: rgba(220, 38, 38, 0.9);
+        border-color: rgba(252, 165, 165, 0.9);
+      }
+      .yt-hover-lock-icon {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background-color: #38bdf8;
+        border-radius: 50%;
+        box-shadow: 0 0 8px #38bdf8;
+        animation: yt-pulse-glow 1.5s infinite;
+      }
+      @keyframes yt-pulse-glow {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.8); }
+      }
+      .yt-hover-locked-card {
+        outline: 2px solid rgba(56, 189, 248, 0.8) !important;
+        outline-offset: -2px;
+      }
+      ytd-video-preview.yt-hover-locked-active,
+      ytd-video-preview.yt-hover-locked-active #inline-preview-player,
+      ytd-video-preview.yt-hover-locked-active #player-container {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  // Hook HTMLMediaElement.prototype.pause
+  const originalPause = HTMLMediaElement.prototype.pause;
+  HTMLMediaElement.prototype.pause = function () {
+    if (window.__YT_HOVER_LOCK_LOCKED__) {
+      const isPreview =
+        this.closest('ytd-video-preview') ||
+        this.closest('#video-preview') ||
+        this.closest('#mouseover-overlay') ||
+        (lockedCard && lockedCard.contains(this));
+
+      if (isPreview) {
+        return; // Prevent pause while locked!
+      }
+    }
+    return originalPause.apply(this, arguments);
+  };
+
+  function suppressIfLocked(e) {
+    if (window.__YT_HOVER_LOCK_LOCKED__) {
+      e.stopImmediatePropagation();
+    }
+  }
+
+  window.addEventListener('blur', suppressIfLocked, true);
+  window.addEventListener('focusout', (e) => {
+    if (window.__YT_HOVER_LOCK_LOCKED__ && !e.relatedTarget) {
+      suppressIfLocked(e);
+    }
+  }, true);
+  document.addEventListener('visibilitychange', suppressIfLocked, true);
+
+  function handleLeaveEvents(e) {
+    if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+    e.stopImmediatePropagation();
+    e.stopPropagation();
+  }
+
+  window.addEventListener('mouseleave', handleLeaveEvents, true);
+  window.addEventListener('mouseout', handleLeaveEvents, true);
+  window.addEventListener('pointerleave', handleLeaveEvents, true);
+  window.addEventListener('pointerout', handleLeaveEvents, true);
 
   const CARD_SELECTORS = [
     'ytd-rich-item-renderer',
@@ -99,57 +155,40 @@
   document.addEventListener('pointerover', onPointerEnter, true);
   document.addEventListener('mouseover', onPointerEnter, true);
 
-  function handleLeaveEvent(e) {
-    if (!lockedCard) return;
-    if (
-      lockedCard.contains(e.target) ||
-      e.target === lockedCard ||
-      (e.target.closest && (e.target.closest('#video-preview') || e.target.closest('ytd-video-preview')))
-    ) {
-      e.stopImmediatePropagation();
-      e.stopPropagation();
-      e.preventDefault();
-    }
-  }
-
-  window.addEventListener('mouseleave', handleLeaveEvent, true);
-  window.addEventListener('mouseout', handleLeaveEvent, true);
-  window.addEventListener('pointerleave', handleLeaveEvent, true);
-  window.addEventListener('pointerout', handleLeaveEvent, true);
-
-  function ensureVideoPlaying() {
-    if (!lockedCard) return;
-    const previewContainer =
-      document.querySelector('#video-preview') ||
-      document.querySelector('ytd-video-preview') ||
-      (lockedCard.querySelector && lockedCard.querySelector('ytd-video-preview'));
-
-    if (previewContainer) {
-      const video = previewContainer.querySelector('video');
-      if (video && video.paused && !video.ended) {
-        video.play().catch(() => {});
-      }
-    }
-  }
-
   function lockPreview(card) {
-    if (!card || lockedCard === card) return;
-    unlockPreview();
+    if (!card) return;
+    injectStyles();
 
+    if (lockedCard && lockedCard !== card) {
+      unlockPreview();
+    }
+
+    window.__YT_HOVER_LOCK_LOCKED__ = true;
     lockedCard = card;
     lockedCard.classList.add('yt-hover-locked-card');
 
-    lockBadge = document.createElement('div');
-    lockBadge.className = 'yt-hover-lock-badge';
-    lockBadge.innerHTML = `
-      <span class="yt-hover-lock-icon"></span>
-      <span>Preview Locked</span>
-    `;
-    lockBadge.title = 'Click to release preview lock';
-    lockBadge.addEventListener('click', (e) => {
-      e.stopPropagation();
-      unlockPreview();
-    });
+    lockedPreviewElement =
+      document.querySelector('#video-preview') ||
+      document.querySelector('ytd-video-preview') ||
+      lockedCard.querySelector('ytd-video-preview');
+
+    if (lockedPreviewElement) {
+      lockedPreviewElement.classList.add('yt-hover-locked-active');
+    }
+
+    if (!lockBadge) {
+      lockBadge = document.createElement('div');
+      lockBadge.className = 'yt-hover-lock-badge';
+      lockBadge.innerHTML = `
+        <span class="yt-hover-lock-icon"></span>
+        <span>Locked</span>
+      `;
+      lockBadge.title = 'Preview is locked! Playing continuously across monitors. Click or press Alt+P to unlock.';
+      lockBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        unlockPreview();
+      });
+    }
 
     const thumbnailContainer =
       lockedCard.querySelector('#thumbnail') ||
@@ -161,23 +200,80 @@
       thumbnailContainer.appendChild(lockBadge);
     }
 
-    if (videoResumeInterval) clearInterval(videoResumeInterval);
-    videoResumeInterval = setInterval(ensureVideoPlaying, 400);
+    if (domObserver) domObserver.disconnect();
+    domObserver = new MutationObserver(() => {
+      if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+
+      const preview =
+        document.querySelector('#video-preview') ||
+        document.querySelector('ytd-video-preview');
+
+      if (preview) {
+        if (preview.hasAttribute('hidden')) {
+          preview.removeAttribute('hidden');
+        }
+        if (preview.style.display === 'none') {
+          preview.style.display = 'block';
+        }
+        const video = preview.querySelector('video');
+        if (video && video.paused && !video.ended) {
+          video.play().catch(() => {});
+        }
+      }
+    });
+
+    domObserver.observe(document.body, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['hidden', 'style', 'class']
+    });
+
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+
+      const preview =
+        lockedPreviewElement ||
+        document.querySelector('#video-preview') ||
+        document.querySelector('ytd-video-preview');
+
+      if (preview) {
+        const video = preview.querySelector('video');
+        if (video && video.paused && !video.ended) {
+          video.play().catch(() => {});
+        }
+      }
+    }, 250);
   }
 
   function unlockPreview() {
+    window.__YT_HOVER_LOCK_LOCKED__ = false;
+
     if (autoLockTimer) {
       clearTimeout(autoLockTimer);
       autoLockTimer = null;
     }
-    if (videoResumeInterval) {
-      clearInterval(videoResumeInterval);
-      videoResumeInterval = null;
+
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
     }
+
+    if (domObserver) {
+      domObserver.disconnect();
+      domObserver = null;
+    }
+
     if (lockBadge) {
       lockBadge.remove();
       lockBadge = null;
     }
+
+    if (lockedPreviewElement) {
+      lockedPreviewElement.classList.remove('yt-hover-locked-active');
+      lockedPreviewElement = null;
+    }
+
     if (lockedCard) {
       lockedCard.classList.remove('yt-hover-locked-card');
       lockedCard = null;
@@ -185,11 +281,13 @@
   }
 
   function toggleLock() {
-    if (lockedCard) {
+    if (window.__YT_HOVER_LOCK_LOCKED__) {
       unlockPreview();
     } else {
       const target = hoveredCard || findParentVideoCard(document.querySelector(':hover'));
-      if (target) lockPreview(target);
+      if (target) {
+        lockPreview(target);
+      }
     }
   }
 
@@ -200,12 +298,16 @@
         e.preventDefault();
         e.stopPropagation();
         toggleLock();
-      } else if (e.key === 'Escape' && lockedCard) {
+      } else if (e.key === 'Escape' && window.__YT_HOVER_LOCK_LOCKED__) {
         unlockPreview();
       }
     },
     true
   );
 
-  console.log('[YouTube Hover Lock] Userscript loaded with Auto-Lock.');
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectStyles);
+  } else {
+    injectStyles();
+  }
 })();

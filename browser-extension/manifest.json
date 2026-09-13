@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "YouTube Hover Lock",
-  "version": "1.0.0",
-  "description": "Keeps YouTube inline thumbnail video previews playing even when moving your mouse away or switching monitors.",
+  "version": "1.2.0",
+  "description": "Keeps YouTube inline thumbnail video previews playing even when moving your mouse away, switching monitors, or clicking elsewhere.",
   "permissions": [],
   "host_permissions": [
     "*://*.youtube.com/*"
@@ -11,8 +11,8 @@
     {
       "matches": ["*://*.youtube.com/*"],
       "js": ["content.js"],
-      "css": ["styles.css"],
-      "run_at": "document_idle"
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ]
 }

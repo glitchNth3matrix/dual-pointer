@@ -1,18 +1,136 @@
 /**
- * YouTube Hover Lock - Content Script
- * Keeps inline thumbnail video previews actively playing when moving
- * mouse away, switching to another monitor, or working in another app.
+ * YouTube Hover Lock - Main World Engine
+ * Runs directly in the page context to hook HTMLMediaElement, DOM events,
+ * and component lifecycles so video previews never pause on mouseleave,
+ * monitor switch, window blur, or external clicks.
  */
 
 (function () {
   'use strict';
 
+  window.__YT_HOVER_LOCK_LOCKED__ = false;
+
   let hoveredCard = null;
   let lockedCard = null;
+  let lockedPreviewElement = null;
   let lockBadge = null;
-  let videoResumeInterval = null;
   let autoLockTimer = null;
+  let heartbeatTimer = null;
+  let domObserver = null;
 
+  // 1. Inject Bulletproof CSS
+  function injectStyles() {
+    if (document.getElementById('yt-hover-lock-css')) return;
+    const style = document.createElement('style');
+    style.id = 'yt-hover-lock-css';
+    style.textContent = `
+      .yt-hover-lock-badge {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 2200;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        font-family: Roboto, Arial, sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        color: #ffffff;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(56, 189, 248, 0.7);
+        border-radius: 6px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        pointer-events: auto;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        user-select: none;
+      }
+      .yt-hover-lock-badge:hover {
+        background: rgba(220, 38, 38, 0.9);
+        border-color: rgba(252, 165, 165, 0.9);
+      }
+      .yt-hover-lock-icon {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        background-color: #38bdf8;
+        border-radius: 50%;
+        box-shadow: 0 0 8px #38bdf8;
+        animation: yt-pulse-glow 1.5s infinite;
+      }
+      @keyframes yt-pulse-glow {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.8); }
+      }
+      .yt-hover-locked-card {
+        outline: 2px solid rgba(56, 189, 248, 0.8) !important;
+        outline-offset: -2px;
+      }
+      /* Prevent preview player from being visually collapsed or hidden while locked */
+      ytd-video-preview.yt-hover-locked-active,
+      ytd-video-preview.yt-hover-locked-active #inline-preview-player,
+      ytd-video-preview.yt-hover-locked-active #player-container {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  // 2. Hook HTMLMediaElement.prototype.pause
+  // Directly prevents YouTube's internal blur/leave timers from pausing the preview video!
+  const originalPause = HTMLMediaElement.prototype.pause;
+  HTMLMediaElement.prototype.pause = function () {
+    if (window.__YT_HOVER_LOCK_LOCKED__) {
+      const isPreview =
+        this.closest('ytd-video-preview') ||
+        this.closest('#video-preview') ||
+        this.closest('#mouseover-overlay') ||
+        (lockedCard && lockedCard.contains(this));
+
+      if (isPreview) {
+        // Block the pause call!
+        return;
+      }
+    }
+    return originalPause.apply(this, arguments);
+  };
+
+  // 3. Intercept Blur & Visibility Change
+  // When switching monitors or clicking another window, Chrome fires blur.
+  // We prevent YouTube from seeing window blur while locked.
+  function suppressIfLocked(e) {
+    if (window.__YT_HOVER_LOCK_LOCKED__) {
+      e.stopImmediatePropagation();
+    }
+  }
+
+  window.addEventListener('blur', suppressIfLocked, true);
+  window.addEventListener('focusout', (e) => {
+    if (window.__YT_HOVER_LOCK_LOCKED__ && !e.relatedTarget) {
+      suppressIfLocked(e);
+    }
+  }, true);
+  document.addEventListener('visibilitychange', suppressIfLocked, true);
+
+  // 4. Intercept Leave Events
+  function handleLeaveEvents(e) {
+    if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+
+    // Prevent YouTube's card leave handler from firing
+    e.stopImmediatePropagation();
+    e.stopPropagation();
+  }
+
+  window.addEventListener('mouseleave', handleLeaveEvents, true);
+  window.addEventListener('mouseout', handleLeaveEvents, true);
+  window.addEventListener('pointerleave', handleLeaveEvents, true);
+  window.addEventListener('pointerout', handleLeaveEvents, true);
+
+  // 5. Card Detection
   const CARD_SELECTORS = [
     'ytd-rich-item-renderer',
     'ytd-compact-video-renderer',
@@ -27,13 +145,12 @@
     return target.closest(CARD_SELECTORS.join(', '));
   }
 
-  // 1. Track currently hovered video card & auto-lock after brief hover
   function onPointerEnter(e) {
     const card = findParentVideoCard(e.target);
     if (card && card !== hoveredCard) {
       hoveredCard = card;
 
-      // Auto-lock after hovering for 700ms (when preview starts playing)
+      // Auto-lock after hovering for 700ms (preview starts playing)
       if (autoLockTimer) clearTimeout(autoLockTimer);
       autoLockTimer = setTimeout(() => {
         if (hoveredCard === card && lockedCard !== card) {
@@ -46,67 +163,43 @@
   document.addEventListener('pointerover', onPointerEnter, true);
   document.addEventListener('mouseover', onPointerEnter, true);
 
-  // 2. Intercept mouse/pointer leave events when a card is locked
-  function handleLeaveEvent(e) {
-    if (!lockedCard) return;
-
-    // If the leave event is originating from or targeting the locked card or video preview
-    if (
-      lockedCard.contains(e.target) ||
-      e.target === lockedCard ||
-      (e.target.closest && (e.target.closest('#video-preview') || e.target.closest('ytd-video-preview')))
-    ) {
-      e.stopImmediatePropagation();
-      e.stopPropagation();
-      e.preventDefault();
-    }
-  }
-
-  window.addEventListener('mouseleave', handleLeaveEvent, true);
-  window.addEventListener('mouseout', handleLeaveEvent, true);
-  window.addEventListener('pointerleave', handleLeaveEvent, true);
-  window.addEventListener('pointerout', handleLeaveEvent, true);
-
-  // 3. Keep video playing if YouTube attempts to pause on blur / mouseleave
-  function ensureVideoPlaying() {
-    if (!lockedCard) return;
-
-    // Find the preview container in the DOM
-    const previewContainer =
-      document.querySelector('#video-preview') ||
-      document.querySelector('ytd-video-preview') ||
-      (lockedCard.querySelector && lockedCard.querySelector('ytd-video-preview'));
-
-    if (previewContainer) {
-      const video = previewContainer.querySelector('video');
-      if (video && video.paused && !video.ended) {
-        video.play().catch(() => {});
-      }
-    }
-  }
-
-  // 4. Lock / Unlock management
+  // 6. Lock / Unlock State Management
   function lockPreview(card) {
     if (!card) return;
-    if (lockedCard === card) return;
+    injectStyles();
 
-    unlockPreview(); // Clear any previously locked card
+    if (lockedCard && lockedCard !== card) {
+      unlockPreview();
+    }
 
+    window.__YT_HOVER_LOCK_LOCKED__ = true;
     lockedCard = card;
     lockedCard.classList.add('yt-hover-locked-card');
 
-    // Create and attach visual lock badge
-    lockBadge = document.createElement('div');
-    lockBadge.className = 'yt-hover-lock-badge';
-    lockBadge.innerHTML = `
-      <span class="yt-hover-lock-icon"></span>
-      <span>Preview Locked</span>
-    `;
-    lockBadge.title = 'Preview locked! Moves across screens will not stop playback. Click or press Alt+P to unlock.';
-    lockBadge.addEventListener('click', (e) => {
-      e.stopPropagation();
-      unlockPreview();
-    });
+    // Find the preview element
+    lockedPreviewElement =
+      document.querySelector('#video-preview') ||
+      document.querySelector('ytd-video-preview') ||
+      lockedCard.querySelector('ytd-video-preview');
+
+    if (lockedPreviewElement) {
+      lockedPreviewElement.classList.add('yt-hover-locked-active');
+    }
+
+    // Attach visual lock badge
+    if (!lockBadge) {
+      lockBadge = document.createElement('div');
+      lockBadge.className = 'yt-hover-lock-badge';
+      lockBadge.innerHTML = `
+        <span class="yt-hover-lock-icon"></span>
+        <span>Locked</span>
+      `;
+      lockBadge.title = 'Preview is locked! Playing continuously across monitors. Click or press Alt+P to unlock.';
+      lockBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        unlockPreview();
+      });
+    }
 
     const thumbnailContainer =
       lockedCard.querySelector('#thumbnail') ||
@@ -118,22 +211,72 @@
       thumbnailContainer.appendChild(lockBadge);
     }
 
-    // Keep active preview alive
-    if (videoResumeInterval) clearInterval(videoResumeInterval);
-    videoResumeInterval = setInterval(ensureVideoPlaying, 400);
+    // MutationObserver to prevent YouTube from hiding the preview element
+    if (domObserver) domObserver.disconnect();
+    domObserver = new MutationObserver(() => {
+      if (!window.__YT_HOVER_LOCK_LOCKED__) return;
 
-    console.log('[YouTube Hover Lock] Preview locked.');
+      const preview =
+        document.querySelector('#video-preview') ||
+        document.querySelector('ytd-video-preview');
+
+      if (preview) {
+        if (preview.hasAttribute('hidden')) {
+          preview.removeAttribute('hidden');
+        }
+        if (preview.style.display === 'none') {
+          preview.style.display = 'block';
+        }
+        const video = preview.querySelector('video');
+        if (video && video.paused && !video.ended) {
+          video.play().catch(() => {});
+        }
+      }
+    });
+
+    domObserver.observe(document.body, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['hidden', 'style', 'class']
+    });
+
+    // Heartbeat to keep video actively playing
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+
+      const preview =
+        lockedPreviewElement ||
+        document.querySelector('#video-preview') ||
+        document.querySelector('ytd-video-preview');
+
+      if (preview) {
+        const video = preview.querySelector('video');
+        if (video && video.paused && !video.ended) {
+          video.play().catch(() => {});
+        }
+      }
+    }, 250);
+
+    console.log('[YouTube Hover Lock] Preview locked. Protected against blur and mouseleave.');
   }
 
   function unlockPreview() {
+    window.__YT_HOVER_LOCK_LOCKED__ = false;
+
     if (autoLockTimer) {
       clearTimeout(autoLockTimer);
       autoLockTimer = null;
     }
 
-    if (videoResumeInterval) {
-      clearInterval(videoResumeInterval);
-      videoResumeInterval = null;
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+
+    if (domObserver) {
+      domObserver.disconnect();
+      domObserver = null;
     }
 
     if (lockBadge) {
@@ -141,14 +284,21 @@
       lockBadge = null;
     }
 
+    if (lockedPreviewElement) {
+      lockedPreviewElement.classList.remove('yt-hover-locked-active');
+      lockedPreviewElement = null;
+    }
+
     if (lockedCard) {
       lockedCard.classList.remove('yt-hover-locked-card');
       lockedCard = null;
     }
+
+    console.log('[YouTube Hover Lock] Preview unlocked.');
   }
 
   function toggleLock() {
-    if (lockedCard) {
+    if (window.__YT_HOVER_LOCK_LOCKED__) {
       unlockPreview();
     } else {
       const target = hoveredCard || findParentVideoCard(document.querySelector(':hover'));
@@ -158,7 +308,7 @@
     }
   }
 
-  // 5. Global Hotkey: Alt + P
+  // 7. Global Hotkey: Alt + P
   window.addEventListener(
     'keydown',
     (e) => {
@@ -166,12 +316,19 @@
         e.preventDefault();
         e.stopPropagation();
         toggleLock();
-      } else if (e.key === 'Escape' && lockedCard) {
+      } else if (e.key === 'Escape' && window.__YT_HOVER_LOCK_LOCKED__) {
         unlockPreview();
       }
     },
     true
   );
 
-  console.log('[YouTube Hover Lock] Active with Auto-Lock. Hover a video to lock preview; Alt+P or click badge to toggle.');
+  // Initialize styles
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectStyles);
+  } else {
+    injectStyles();
+  }
+
+  console.log('[YouTube Hover Lock v1.2] Loaded in MAIN world. Preview protection active.');
 })();
