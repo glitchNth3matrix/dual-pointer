@@ -25,6 +25,8 @@ try:
     from desktop.ghost_overlay import GhostOverlay
     from desktop.hotkey_manager import HotkeyManager
     from desktop.autostart import is_autostart_enabled, set_autostart
+    from desktop.mouse_hook import MouseHookManager
+    from desktop.ripple_overlay import LandingRippleOverlay
 except ImportError:
     from config import DualPointerConfig
     from cursor_manager import (
@@ -35,6 +37,8 @@ except ImportError:
     from ghost_overlay import GhostOverlay
     from hotkey_manager import HotkeyManager
     from autostart import is_autostart_enabled, set_autostart
+    from mouse_hook import MouseHookManager
+    from ripple_overlay import LandingRippleOverlay
 
 CONFIG_FILE = os.path.expanduser("~/.dualpointer_config.json")
 
@@ -75,10 +79,14 @@ class DualPointerApp:
             size=self.config.overlay_size,
         )
         self.hotkey_manager = HotkeyManager(on_trigger=self.toggle_cursor_slot)
+        self.mouse_hook = MouseHookManager(on_trigger=self.toggle_cursor_slot)
+        self.ripple_overlay = LandingRippleOverlay(
+            enabled=self.config.landing_ripple,
+        )
         self._tray_icon = None
 
     def toggle_cursor_slot(self):
-        """Action performed when the global hotkey is pressed."""
+        """Action performed when the global hotkey or mouse side button is pressed."""
         # 1. Switch slot and teleport cursor in OS
         target_pos = self.cursor_manager.switch_slot(apply_to_os=True)
 
@@ -90,7 +98,14 @@ class DualPointerApp:
             slot_num=self.cursor_manager.inactive_slot,
         )
 
-        # 3. Optional audio feedback
+        # 3. Trigger landing ripple pulse at the destination cursor location
+        self.ripple_overlay.pulse(
+            target_pos[0],
+            target_pos[1],
+            slot_num=self.cursor_manager.active_slot,
+        )
+
+        # 4. Optional audio feedback
         if self.config.sound_cues and sys.platform == "win32":
             try:
                 import winsound
@@ -99,7 +114,7 @@ class DualPointerApp:
             except Exception:
                 pass
 
-        # 4. Update tray icon
+        # 5. Update tray icon
         if self._tray_icon:
             self._tray_icon.icon = create_tray_icon_image(self.cursor_manager.active_slot)
             self._tray_icon.title = (
@@ -128,22 +143,41 @@ class DualPointerApp:
         parked_pos = self.cursor_manager.inactive_slot_pos
         self.ghost_overlay.show(parked_pos[0], parked_pos[1], self.cursor_manager.inactive_slot)
 
+    def toggle_mouse_side_button(self, item=None):
+        if self.config.mouse_side_button == "none":
+            self.config.mouse_side_button = "xbutton1"
+        else:
+            self.config.mouse_side_button = "none"
+        self.mouse_hook.start(self.config.mouse_side_button)
+        self.config.save_to_file(self.config_path)
+
+    def toggle_landing_ripple(self, item=None):
+        new_val = not self.config.landing_ripple
+        self.config.landing_ripple = new_val
+        self.ripple_overlay.set_enabled(new_val)
+        self.config.save_to_file(self.config_path)
+
     def toggle_autostart(self, item=None):
         current = is_autostart_enabled()
         set_autostart(not current)
 
     def quit_app(self, item=None):
         self.ghost_overlay.stop()
+        self.ripple_overlay.stop()
+        self.mouse_hook.stop()
         self.hotkey_manager.stop()
         if self._tray_icon:
             self._tray_icon.stop()
 
     def run(self):
-        """Starts hotkey listener and system tray event loop."""
+        """Starts hotkey listener, mouse hook, and system tray event loop."""
         self.hotkey_manager.start(
             modifier=self.config.hotkey_modifier,
             key=self.config.hotkey_key,
         )
+
+        if self.config.mouse_side_button != "none":
+            self.mouse_hook.start(self.config.mouse_side_button)
 
         # Display ghost cursor at the inactive slot position immediately on launch
         if self.config.ghost_cursor_enabled:
@@ -161,6 +195,16 @@ class DualPointerApp:
                     default=True,
                 ),
                 pystray.Menu.SEPARATOR,
+                item(
+                    "Switch with Mouse Thumb Button",
+                    self.toggle_mouse_side_button,
+                    checked=lambda item: self.config.mouse_side_button != "none",
+                ),
+                item(
+                    "Landing Ripple Pulse",
+                    self.toggle_landing_ripple,
+                    checked=lambda item: self.config.landing_ripple,
+                ),
                 item(
                     "Show Parked Ghost Pointer",
                     self.toggle_ghost_overlay,
@@ -188,7 +232,7 @@ class DualPointerApp:
                 menu=menu,
             )
 
-            print(f"DualPointer running. Press {self.config.hotkey_modifier}+{self.config.hotkey_key} to toggle cursors.")
+            print(f"DualPointer running. Press {self.config.hotkey_modifier}+{self.config.hotkey_key} or Thumb Mouse Button to toggle cursors.")
             self._tray_icon.run()
 
         except ImportError:

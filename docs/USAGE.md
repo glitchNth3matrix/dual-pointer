@@ -1,4 +1,4 @@
-# DualPointer User Guide & Workflow (v1.2)
+# DualPointer User Guide & Workflow (v1.3)
 
 ## Overview
 DualPointer enables you to control two independent mouse pointer locations on Windows using a single physical mouse, while keeping video previews on websites like YouTube continuously playing across monitors, window clicks, and application switches.
@@ -7,59 +7,66 @@ DualPointer enables you to control two independent mouse pointer locations on Wi
 
 ## Step-by-Step Setup
 
-### Step 1: Install the YouTube Hover Lock Extension (One-time)
-1. In Google Chrome, Microsoft Edge, or Brave, go to your extensions settings:
+### Step 1: Install or Reload the YouTube Hover Lock Extension
+1. In Google Chrome, Microsoft Edge, or Brave, navigate to:
    - Chrome: `chrome://extensions`
    - Edge: `edge://extensions`
-2. Turn ON **Developer mode** (toggle in the top-right corner).
-3. Click **Load unpacked** (top-left button).
-4. Select the `browser-extension` folder in this repository.
-5. The extension is now active and running with **Automatic Hover Lock**.
-
-> **Note:** If you already had the extension loaded previously, simply click the **🔄 Reload** button on the extension card in `chrome://extensions`, then refresh any open YouTube tabs.
+2. Turn ON **Developer mode** (toggle in top-right corner).
+3. Click **Load unpacked** (top-left button) and select the `browser-extension` folder:
+   ```text
+   ...\dual-pointer\browser-extension
+   ```
+   *(If already loaded, simply click the **🔄 Reload** icon on the extension card).*
+4. Click the extension icon in your browser toolbar to customize settings via the new **Popup Menu**:
+   - **Auto-Lock on Hover**: Enable/disable automatic locking.
+   - **Hover Delay**: Adjust delay from 200ms to 2000ms.
+   - **Auto-Loop Video**: Continuously loop previews.
+   - **Auto-Unmute Audio**: Unmute audio immediately when a preview locks.
+   - **On-Screen Badge**: Show or hide the status badge.
 
 ---
 
-### Step 2: Start the Desktop Dual Cursor Utility
+### Step 2: Run the Desktop Dual Cursor Utility
 In PowerShell or Command Prompt:
 
 ```powershell
 python desktop/dual_pointer.py
 ```
 
-*(Or `pythonw desktop/dual_pointer.py` to run silently in the background without a console window).*
+*(Or run silently in the background with `pythonw desktop/dual_pointer.py`).*
 
-You will see:
-- A colored tray icon appear in your notification area (near the clock).
-- A subtle, semi-transparent ghost pointer appear at the parked slot position on your screen.
+Features running automatically:
+- **Hotkeys**: Press **`Alt + \`** to switch cursors.
+- **Mouse Thumb Button**: Click your mouse side button (Back) for instant switching without moving your hand to the keyboard.
+- **Landing Ripple**: An animated cyan/orange sonar ripple marks your new mouse location immediately upon teleporting.
+- **Ghost Pointer**: A click-through indicator marks your parked cursor location on the inactive monitor.
 
 ---
 
-## Daily Workflow: Watching YouTube Previews while Working Across Screens
+## Daily Workflow: YouTube Previews across Multiple Screens
 
 1. **Hover on YouTube (Monitor 1)**:
    - Move your cursor over any video card on the YouTube homepage or search page.
-   - The preview will begin playing, and within ~0.7 seconds, a blue **`[🔒 Locked]`** badge will appear in the top-right corner.
+   - Within your configured delay (default: 700ms), the preview locks and shows the blue **`[🔒 Locked]`** badge.
 
-2. **Switch to Monitor 2**:
-   - Press **`Alt + \`** (the Backslash key above Enter).
-   - Your system cursor immediately teleports to Monitor 2.
-   - A ghost pointer indicator remains over the YouTube card on Monitor 1.
-   - The video preview **continues playing without stopping**, even when you click, type, scroll, or switch applications on Monitor 2!
+2. **Teleport to Monitor 2**:
+   - Click your **Mouse Thumb Button** or press **`Alt + \`**.
+   - Your cursor instantly snaps to Monitor 2, highlighted by a subtle landing sonar pulse.
+   - The YouTube preview on Monitor 1 **keeps playing smoothly without stopping**, even while you click, scroll, and type on Monitor 2!
 
-3. **Switch Back to Monitor 1**:
-   - Press **`Alt + \`** again whenever you want to return to Monitor 1.
-   - Your cursor returns to the exact location you left it.
+3. **Return to Monitor 1**:
+   - Click the side button or press **`Alt + \`** again.
+   - Your cursor lands exactly where you left it on Monitor 1.
 
-4. **Changing or Dismissing Previews**:
-   - **Switch to a different video**: Hover your mouse over another video thumbnail for 0.7s; the lock smoothly transfers to the new video.
-   - **Release the preview**: Press **`Alt + P`**, press **`Escape`**, or click the blue lock badge to unlock.
+4. **Dismissing or Transferring Previews**:
+   - Hover over another video to transfer the lock.
+   - Press **`Alt + P`**, hit **`Escape`**, or click the blue lock badge to release.
 
 ---
 
-## Customizing Hotkeys & Preferences
+## Customizing Preferences
 
-Settings are saved in `~/.dualpointer_config.json` (in your user profile directory `C:\Users\<username>\.dualpointer_config.json`):
+Configuration is saved in `~/.dualpointer_config.json`:
 
 ```json
 {
@@ -67,12 +74,13 @@ Settings are saved in `~/.dualpointer_config.json` (in your user profile directo
   "hotkey_key": "\\",
   "ghost_cursor_enabled": true,
   "overlay_size": 44,
-  "sound_cues": false
+  "sound_cues": false,
+  "mouse_side_button": "xbutton1",
+  "landing_ripple": true
 }
 ```
 
-- **`hotkey_modifier`**: `"alt"`, `"ctrl"`, `"ctrl+alt"`, or `"none"`
-- **`hotkey_key`**: `"\\"`, `"c"`, `"f8"`, `"space"`, etc.
-- **`ghost_cursor_enabled`**: `true` / `false` (display visual parked indicator)
-- **`sound_cues`**: `true` / `false` (subtle audio beep on switch)
-- **`overlay_size`**: pixel size of the ghost indicator (default: 44)
+- **`mouse_side_button`**: `"xbutton1"` (thumb back), `"xbutton2"` (thumb forward), or `"none"`
+- **`landing_ripple`**: `true` / `false` (expand sonar ring upon teleporting)
+- **`ghost_cursor_enabled`**: `true` / `false` (show parked cursor indicator)
+- **`sound_cues`**: `true` / `false` (auditory pitch confirmation)

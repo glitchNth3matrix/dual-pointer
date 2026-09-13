@@ -10,6 +10,38 @@
 
   window.__YT_HOVER_LOCK_LOCKED__ = false;
 
+  const DEFAULT_CONFIG = {
+    masterEnabled: true,
+    autoLockOnHover: true,
+    hoverDelay: 700,
+    autoLoop: true,
+    autoUnmute: false,
+    showBadge: true
+  };
+
+  let config = { ...DEFAULT_CONFIG };
+
+  // Load persisted user settings
+  try {
+    const saved = localStorage.getItem('yt_hover_lock_config');
+    if (saved) {
+      config = { ...config, ...JSON.parse(saved) };
+    }
+  } catch (_) {}
+
+  // Synchronize settings from extension popup dynamically
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'YT_HOVER_LOCK_UPDATE_CONFIG' && e.data.config) {
+      config = { ...config, ...e.data.config };
+      if (!config.masterEnabled && window.__YT_HOVER_LOCK_LOCKED__) {
+        unlockPreview();
+      }
+      if (lockBadge) {
+        lockBadge.style.display = config.showBadge ? 'flex' : 'none';
+      }
+    }
+  });
+
   let hoveredCard = null;
   let lockedCard = null;
   let lockedPreviewElement = null;
@@ -100,7 +132,7 @@
   // Directly prevents YouTube's internal blur/leave timers from pausing the preview video!
   const originalPause = HTMLMediaElement.prototype.pause;
   HTMLMediaElement.prototype.pause = function () {
-    if (window.__YT_HOVER_LOCK_LOCKED__) {
+    if (window.__YT_HOVER_LOCK_LOCKED__ && config.masterEnabled) {
       const isPreview =
         this.closest('ytd-video-preview') ||
         this.closest('#video-preview') ||
@@ -119,14 +151,14 @@
   // When switching monitors or clicking another window, Chrome fires blur.
   // We prevent YouTube from seeing window blur while locked.
   function suppressIfLocked(e) {
-    if (window.__YT_HOVER_LOCK_LOCKED__) {
+    if (window.__YT_HOVER_LOCK_LOCKED__ && config.masterEnabled) {
       e.stopImmediatePropagation();
     }
   }
 
   window.addEventListener('blur', suppressIfLocked, true);
   window.addEventListener('focusout', (e) => {
-    if (window.__YT_HOVER_LOCK_LOCKED__ && !e.relatedTarget) {
+    if (window.__YT_HOVER_LOCK_LOCKED__ && config.masterEnabled && !e.relatedTarget) {
       suppressIfLocked(e);
     }
   }, true);
@@ -134,7 +166,7 @@
 
   // 4. Intercept Leave Events
   function handleLeaveEvents(e) {
-    if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+    if (!window.__YT_HOVER_LOCK_LOCKED__ || !config.masterEnabled) return;
 
     // Prevent YouTube's card leave handler from firing
     e.stopImmediatePropagation();
@@ -162,17 +194,19 @@
   }
 
   function onPointerEnter(e) {
+    if (!config.masterEnabled || !config.autoLockOnHover) return;
+
     const card = findParentVideoCard(e.target);
     if (card && card !== hoveredCard) {
       hoveredCard = card;
 
-      // Auto-lock after hovering for 700ms (preview starts playing)
+      // Auto-lock after configured hover delay
       if (autoLockTimer) clearTimeout(autoLockTimer);
       autoLockTimer = setTimeout(() => {
-        if (hoveredCard === card && lockedCard !== card) {
+        if (hoveredCard === card && lockedCard !== card && config.masterEnabled && config.autoLockOnHover) {
           lockPreview(card);
         }
-      }, 700);
+      }, config.hoverDelay || 700);
     }
   }
 
@@ -181,7 +215,7 @@
 
   // 6. Lock / Unlock State Management
   function lockPreview(card) {
-    if (!card) return;
+    if (!card || !config.masterEnabled) return;
     injectStyles();
 
     if (lockedCard && lockedCard !== card) {
@@ -235,6 +269,8 @@
       });
     }
 
+    lockBadge.style.display = config.showBadge ? 'flex' : 'none';
+
     const thumbnailContainer =
       lockedCard.querySelector('#thumbnail') ||
       lockedCard.querySelector('ytd-thumbnail') ||
@@ -245,10 +281,27 @@
       thumbnailContainer.appendChild(lockBadge);
     }
 
+    // Auto-unmute if enabled in user configuration
+    if (config.autoUnmute) {
+      const preview =
+        lockedPreviewElement ||
+        document.querySelector('#video-preview') ||
+        document.querySelector('ytd-video-preview');
+      if (preview) {
+        const video = preview.querySelector('video');
+        if (video) {
+          video.muted = false;
+          video.volume = 1.0;
+          const btn = lockBadge && lockBadge.querySelector('#yt-hover-audio-toggle');
+          if (btn) btn.textContent = '🔊';
+        }
+      }
+    }
+
     // MutationObserver to prevent YouTube from hiding the preview element
     if (domObserver) domObserver.disconnect();
     domObserver = new MutationObserver(() => {
-      if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+      if (!window.__YT_HOVER_LOCK_LOCKED__ || !config.masterEnabled) return;
 
       const preview =
         document.querySelector('#video-preview') ||
@@ -263,7 +316,7 @@
         }
         const video = preview.querySelector('video');
         if (video) {
-          if (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4)) {
+          if (config.autoLoop && (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4))) {
             video.currentTime = 0;
             video.play().catch(() => {});
           } else if (video.paused) {
@@ -282,7 +335,7 @@
     // Heartbeat to keep video actively playing and looping
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = setInterval(() => {
-      if (!window.__YT_HOVER_LOCK_LOCKED__) return;
+      if (!window.__YT_HOVER_LOCK_LOCKED__ || !config.masterEnabled) return;
 
       const preview =
         lockedPreviewElement ||
@@ -292,7 +345,7 @@
       if (preview) {
         const video = preview.querySelector('video');
         if (video) {
-          if (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4)) {
+          if (config.autoLoop && (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4))) {
             video.currentTime = 0;
             video.play().catch(() => {});
           } else if (video.paused) {
@@ -308,7 +361,7 @@
       }
     }, 250);
 
-    console.log('[YouTube Hover Lock] Preview locked with Auto-Loop and Audio control.');
+    console.log('[YouTube Hover Lock] Preview locked with Auto-Loop, Custom Delay, and Audio control.');
   }
 
   function unlockPreview() {
@@ -348,6 +401,8 @@
   }
 
   function toggleLock() {
+    if (!config.masterEnabled) return;
+
     if (window.__YT_HOVER_LOCK_LOCKED__) {
       unlockPreview();
     } else {
@@ -380,5 +435,5 @@
     injectStyles();
   }
 
-  console.log('[YouTube Hover Lock v1.2] Loaded in MAIN world. Preview protection active.');
+  console.log('[YouTube Hover Lock v1.3] Loaded in MAIN world with Dynamic Settings sync.');
 })();

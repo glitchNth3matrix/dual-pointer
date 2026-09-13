@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Hover Lock Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-glow">
+          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="4" width="20" height="16" rx="4" />
+            <polygon points="10,8 16,12 10,16" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Hover Lock</h1>
+          <span class="version-tag">v1.3</span>
+        </div>
+      </div>
+      <div id="status-pill" class="status-pill active">
+        <span class="status-dot"></span>
+        <span id="status-text">Active</span>
+      </div>
+    </header>
+
+    <!-- Master Switch Card -->
+    <div class="card master-card">
+      <div class="card-info">
+        <span class="card-title">Preview Protection</span>
+        <span class="card-desc">Keep YouTube previews playing on monitor switch</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="toggle-master" checked>
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <!-- Settings Group -->
+    <div class="section-title">LOCKING BEHAVIOR</div>
+    <div class="card">
+      <div class="setting-row">
+        <div class="card-info">
+          <span class="card-title">Auto-Lock on Hover</span>
+          <span class="card-desc">Lock automatically while hovering over thumbnail</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-autolock" checked>
+          <span class="slider round"></span>
+        </label>
+      </div>
+
+      <!-- Slider Row -->
+      <div class="slider-container" id="delay-container">
+        <div class="slider-header">
+          <span class="slider-label">Hover Lock Delay</span>
+          <span class="slider-value" id="delay-value">700ms</span>
+        </div>
+        <input type="range" id="slider-delay" min="200" max="2000" step="50" value="700">
+        <div class="slider-ticks">
+          <span>Fast (200ms)</span>
+          <span>Balanced</span>
+          <span>Relaxed (2s)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">PLAYBACK CONTROLS</div>
+    <div class="card">
+      <div class="setting-row">
+        <div class="card-info">
+          <span class="card-title">Auto-Loop Video</span>
+          <span class="card-desc">Seamlessly repeat preview when it ends</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-autoloop" checked>
+          <span class="slider round"></span>
+        </label>
+      </div>
+
+      <div class="setting-divider"></div>
+
+      <div class="setting-row">
+        <div class="card-info">
+          <span class="card-title">Auto-Unmute Audio</span>
+          <span class="card-desc">Play audio immediately when preview locks</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-autounmute">
+          <span class="slider round"></span>
+        </label>
+      </div>
+
+      <div class="setting-divider"></div>
+
+      <div class="setting-row">
+        <div class="card-info">
+          <span class="card-title">On-Screen Badge</span>
+          <span class="card-desc">Display [Locked] badge with 🔇/🔊 toggle</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-showbadge" checked>
+          <span class="slider round"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Shortcuts Info Card -->
+    <div class="section-title">QUICK SHORTCUTS</div>
+    <div class="shortcuts-card">
+      <div class="shortcut-item">
+        <span class="shortcut-desc">Switch Monitor Cursor</span>
+        <span class="key-combo"><kbd>Alt</kbd> + <kbd>\</kbd> <span class="dim">or</span> <kbd>Thumb Btn</kbd></span>
+      </div>
+      <div class="shortcut-item">
+        <span class="shortcut-desc">Lock / Unlock Hover</span>
+        <span class="key-combo"><kbd>Alt</kbd> + <kbd>P</kbd></span>
+      </div>
+      <div class="shortcut-item">
+        <span class="shortcut-desc">Dismiss Locked Video</span>
+        <span class="key-combo"><kbd>Esc</kbd></span>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>Seamless Multi-Monitor Workflow &bull; DualPointer</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

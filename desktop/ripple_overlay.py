@@ -1,18 +1,18 @@
 """
-Ghost Pointer Overlay for DualPointer.
-Creates a high-performance, layered, click-through window (WS_EX_TRANSPARENT | WS_EX_LAYERED)
-at the coordinates of the parked/inactive cursor.
+Landing Ripple Overlay for DualPointer.
+Displays a brief, expanding circular sonar/ripple pulse at the new active cursor position
+so you instantly locate your mouse upon switching monitors.
 """
 
 import sys
 import threading
 import queue
 import time
-from typing import Tuple, Optional
+from typing import Optional
 
-_GLOBAL_OVERLAYS = {}
-_WNDPROC_FUNC = None
-_CLASS_REGISTERED = False
+_GLOBAL_RIPPLE_OVERLAYS = {}
+_RIPPLE_WNDPROC_FUNC = None
+_RIPPLE_CLASS_REGISTERED = False
 
 if sys.platform == "win32":
     import ctypes
@@ -25,6 +25,19 @@ if sys.platform == "win32":
     kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
     kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
+    WS_POPUP = 0x80000000
+    WS_EX_TOPMOST = 0x00000008
+    WS_EX_TOOLWINDOW = 0x00000080
+    WS_EX_LAYERED = 0x00080000
+    WS_EX_TRANSPARENT = 0x00000020
+    WS_EX_NOACTIVATE = 0x08000000
+
+    SWP_NOACTIVATE = 0x0010
+    SWP_SHOWWINDOW = 0x0040
+    HWND_TOPMOST = -1
+    SW_HIDE = 0
+    COLOR_KEY = 0x00000000  # Black color key
+
     WNDPROC = ctypes.WINFUNCTYPE(
         ctypes.c_ssize_t,
         wintypes.HWND,
@@ -32,6 +45,7 @@ if sys.platform == "win32":
         wintypes.WPARAM,
         wintypes.LPARAM,
     )
+
     user32.DefWindowProcW.argtypes = [
         wintypes.HWND,
         wintypes.UINT,
@@ -112,9 +126,6 @@ if sys.platform == "win32":
     user32.FillRect.restype = ctypes.c_int
     user32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HANDLE]
 
-    user32.DrawTextW.restype = ctypes.c_int
-    user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int, ctypes.c_void_p, wintypes.UINT]
-
     gdi32.CreateSolidBrush.restype = wintypes.HANDLE
     gdi32.CreateSolidBrush.argtypes = [wintypes.DWORD]
 
@@ -127,20 +138,11 @@ if sys.platform == "win32":
     gdi32.DeleteObject.restype = wintypes.BOOL
     gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
 
-    class POINT(ctypes.Structure):
-        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-    gdi32.Polygon.restype = wintypes.BOOL
-    gdi32.Polygon.argtypes = [wintypes.HDC, ctypes.POINTER(POINT), ctypes.c_int]
-
     gdi32.Ellipse.restype = wintypes.BOOL
     gdi32.Ellipse.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 
-    gdi32.SetBkMode.restype = ctypes.c_int
-    gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
-
-    gdi32.SetTextColor.restype = wintypes.DWORD
-    gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.DWORD]
+    gdi32.GetStockObject.restype = wintypes.HANDLE
+    gdi32.GetStockObject.argtypes = [ctypes.c_int]
 
     class WNDCLASSEX(ctypes.Structure):
         _fields_ = [
@@ -161,10 +163,8 @@ if sys.platform == "win32":
     user32.RegisterClassExW.restype = wintypes.ATOM
     user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEX)]
 
-    COLOR_KEY = 0x00FF00FF  # Magenta transparent key
-
-    def _global_wnd_proc(hwnd, msg, wparam, lparam):
-        overlay = _GLOBAL_OVERLAYS.get(hwnd)
+    def _global_ripple_wndproc(hwnd, msg, wparam, lparam):
+        overlay = _GLOBAL_RIPPLE_OVERLAYS.get(hwnd)
         if msg == 0x000F and overlay:  # WM_PAINT
             ps = PAINTSTRUCT()
             hdc = user32.BeginPaint(hwnd, ctypes.byref(ps))
@@ -174,117 +174,70 @@ if sys.platform == "win32":
             user32.FillRect(hdc, ctypes.byref(rect), bg_brush)
             gdi32.DeleteObject(bg_brush)
 
-            badge_color = 0x00D08000 if overlay.current_slot == 1 else 0x002080FF
-            badge_brush = gdi32.CreateSolidBrush(badge_color)
-            white_brush = gdi32.CreateSolidBrush(0x00FFFFFF)
-            black_pen = gdi32.CreatePen(0, 2, 0x00000000)
+            r = overlay._current_radius
+            cx, cy = overlay.size // 2, overlay.size // 2
+            pen = gdi32.CreatePen(0, 3, overlay._current_color)
+            null_brush = gdi32.GetStockObject(5)  # NULL_BRUSH
 
-            old_brush = gdi32.SelectObject(hdc, white_brush)
-            old_pen = gdi32.SelectObject(hdc, black_pen)
+            old_pen = gdi32.SelectObject(hdc, pen)
+            old_brush = gdi32.SelectObject(hdc, null_brush)
 
-            pts = (POINT * 7)(
-                POINT(0, 0),
-                POINT(0, 22),
-                POINT(6, 17),
-                POINT(11, 26),
-                POINT(15, 24),
-                POINT(10, 15),
-                POINT(17, 15),
-            )
-            gdi32.Polygon(hdc, pts, 7)
+            gdi32.Ellipse(hdc, cx - r, cy - r, cx + r, cy + r)
 
-            gdi32.SelectObject(hdc, badge_brush)
-            gdi32.Ellipse(hdc, 16, 16, 38, 38)
-
-            gdi32.SetBkMode(hdc, 1)  # TRANSPARENT
-            gdi32.SetTextColor(hdc, 0x00FFFFFF)
-            text = str(overlay.current_slot)
-            badge_rect = wintypes.RECT(16, 16, 38, 38)
-            user32.DrawTextW(
-                hdc,
-                text,
-                len(text),
-                ctypes.byref(badge_rect),
-                0x00000001 | 0x00000004 | 0x00000020,
-            )
-
-            gdi32.SelectObject(hdc, old_brush)
             gdi32.SelectObject(hdc, old_pen)
-            gdi32.DeleteObject(badge_brush)
-            gdi32.DeleteObject(white_brush)
-            gdi32.DeleteObject(black_pen)
+            gdi32.SelectObject(hdc, old_brush)
+            gdi32.DeleteObject(pen)
 
             user32.EndPaint(hwnd, ctypes.byref(ps))
             return 0
         elif msg == 0x0002:  # WM_DESTROY
-            _GLOBAL_OVERLAYS.pop(hwnd, None)
+            _GLOBAL_RIPPLE_OVERLAYS.pop(hwnd, None)
             user32.PostQuitMessage(0)
             return 0
 
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
-    _WNDPROC_FUNC = WNDPROC(_global_wnd_proc)
+    _RIPPLE_WNDPROC_FUNC = WNDPROC(_global_ripple_wndproc)
 
 
-class GhostOverlay:
-    """Manages the visual indicator for the parked cursor."""
+class LandingRippleOverlay:
+    """Manages the brief landing animation at the destination cursor position."""
 
-    def __init__(self, enabled: bool = True, size: int = 44):
+    def __init__(self, enabled: bool = True, size: int = 80):
         self.enabled = enabled
         self.size = size
-        self.is_visible = False
-        self.current_pos: Tuple[int, int] = (0, 0)
-        self.current_slot: int = 1
-
+        self._current_radius = 20
+        self._current_color = 0x00D0FF00
         self._thread: Optional[threading.Thread] = None
         self._cmd_queue: queue.Queue = queue.Queue()
+        self._running: bool = False
         self._hwnd = None
-        self._running = False
         self._started_event = threading.Event()
 
         if sys.platform == "win32" and self.enabled:
-            self._start_overlay_thread()
+            self._start_thread()
 
-    def _start_overlay_thread(self):
-        """Starts the dedicated Win32 message loop thread for the overlay window."""
+    def _start_thread(self):
         self._running = True
-        self._thread = threading.Thread(target=self._overlay_worker, daemon=True)
+        self._thread = threading.Thread(target=self._worker, daemon=True)
         self._thread.start()
         self._started_event.wait(timeout=2.0)
 
-    def _overlay_worker(self):
-        """Win32 window message loop running in background thread."""
-        global _CLASS_REGISTERED
+    def _worker(self):
+        global _RIPPLE_CLASS_REGISTERED
         try:
-            import ctypes
-            from ctypes import wintypes
-
-            WS_POPUP = 0x80000000
-            WS_EX_TOPMOST = 0x00000008
-            WS_EX_TOOLWINDOW = 0x00000080
-            WS_EX_LAYERED = 0x00080000
-            WS_EX_TRANSPARENT = 0x00000020
-            WS_EX_NOACTIVATE = 0x08000000
-
-            SWP_NOACTIVATE = 0x0010
-            SWP_SHOWWINDOW = 0x0040
-            HWND_TOPMOST = -1
-            SW_HIDE = 0
-
-            LWA_COLORKEY = 0x00000001
-            LWA_ALPHA = 0x00000002
             hinst = kernel32.GetModuleHandleW(None)
-            class_name = "DualPointerGhostOverlaySingleton"
+            class_name = "DualPointerRippleOverlaySingleton"
 
-            if not _CLASS_REGISTERED:
+            if not _RIPPLE_CLASS_REGISTERED:
                 wce = WNDCLASSEX()
                 wce.cbSize = ctypes.sizeof(WNDCLASSEX)
-                wce.style = 0x0001 | 0x0002  # CS_HREDRAW | CS_VREDRAW
-                wce.lpfnWndProc = _WNDPROC_FUNC
+                wce.style = 3
+                wce.lpfnWndProc = _RIPPLE_WNDPROC_FUNC
                 wce.hInstance = hinst
                 wce.lpszClassName = class_name
                 user32.RegisterClassExW(ctypes.byref(wce))
-                _CLASS_REGISTERED = True
+                _RIPPLE_CLASS_REGISTERED = True
 
             ex_style = (
                 WS_EX_TOPMOST
@@ -297,7 +250,7 @@ class GhostOverlay:
             hwnd = user32.CreateWindowExW(
                 ex_style,
                 class_name,
-                "DualPointerGhost",
+                "DualPointerRipple",
                 WS_POPUP,
                 0,
                 0,
@@ -309,11 +262,9 @@ class GhostOverlay:
                 None,
             )
 
-            user32.SetLayeredWindowAttributes(
-                hwnd, COLOR_KEY, 240, LWA_COLORKEY | LWA_ALPHA
-            )
+            user32.SetLayeredWindowAttributes(hwnd, COLOR_KEY, 220, 1 | 2)  # LWA_COLORKEY | LWA_ALPHA
             self._hwnd = hwnd
-            _GLOBAL_OVERLAYS[hwnd] = self
+            _GLOBAL_RIPPLE_OVERLAYS[hwnd] = self
             self._started_event.set()
 
             msg = wintypes.MSG()
@@ -321,23 +272,28 @@ class GhostOverlay:
                 try:
                     while True:
                         cmd, args = self._cmd_queue.get_nowait()
-                        if cmd == "SHOW":
-                            x, y = args
+                        if cmd == "PULSE":
+                            x, y, color = args
+                            self._current_color = color
+                            half = self.size // 2
                             user32.SetWindowPos(
                                 hwnd,
                                 HWND_TOPMOST,
-                                x,
-                                y,
+                                x - half,
+                                y - half,
                                 self.size,
                                 self.size,
                                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
                             )
-                            user32.InvalidateRect(hwnd, None, True)
-                        elif cmd == "HIDE":
+                            # Animate expanding ring
+                            for radius in (12, 18, 26, 34):
+                                self._current_radius = radius
+                                user32.InvalidateRect(hwnd, None, True)
+                                time.sleep(0.04)
                             user32.ShowWindow(hwnd, SW_HIDE)
                         elif cmd == "STOP":
                             self._running = False
-                            _GLOBAL_OVERLAYS.pop(hwnd, None)
+                            _GLOBAL_RIPPLE_OVERLAYS.pop(hwnd, None)
                             user32.DestroyWindow(hwnd)
                             break
                         self._cmd_queue.task_done()
@@ -356,30 +312,20 @@ class GhostOverlay:
         except Exception:
             self._started_event.set()
 
-    def show(self, x: int, y: int, slot_num: int = 1):
-        """Displays the ghost overlay at (x, y) with the specified slot badge."""
-        if not self.enabled:
+    def pulse(self, x: int, y: int, slot_num: int = 1):
+        """Displays an expanding pulse ripple at (x, y)."""
+        if not self.enabled or not self._running:
             return
-
-        self.current_pos = (x, y)
-        self.current_slot = slot_num
-        self.is_visible = True
-        self._cmd_queue.put(("SHOW", (x, y)))
-
-    def hide(self):
-        """Hides the ghost overlay window."""
-        self.is_visible = False
-        self._cmd_queue.put(("HIDE", None))
+        color = 0x00D0FF00 if slot_num == 1 else 0x0000A5FF
+        self._cmd_queue.put(("PULSE", (x, y, color)))
 
     def set_enabled(self, enabled: bool):
-        """Toggles whether the ghost cursor overlay is enabled."""
         self.enabled = enabled
-        if not enabled and self.is_visible:
-            self.hide()
+        if enabled and not self._running and sys.platform == "win32":
+            self._start_thread()
 
     def stop(self):
-        """Cleans up and destroys the overlay window."""
-        self.hide()
+        self._running = False
         self._cmd_queue.put(("STOP", None))
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=0.8)

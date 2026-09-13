@@ -14,6 +14,36 @@
 
   window.__YT_HOVER_LOCK_LOCKED__ = false;
 
+  const DEFAULT_CONFIG = {
+    masterEnabled: true,
+    autoLockOnHover: true,
+    hoverDelay: 700,
+    autoLoop: true,
+    autoUnmute: false,
+    showBadge: true
+  };
+
+  let config = { ...DEFAULT_CONFIG };
+
+  try {
+    const saved = localStorage.getItem('yt_hover_lock_config');
+    if (saved) {
+      config = { ...config, ...JSON.parse(saved) };
+    }
+  } catch (_) {}
+
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'YT_HOVER_LOCK_UPDATE_CONFIG' && e.data.config) {
+      config = { ...config, ...e.data.config };
+      if (!config.masterEnabled && window.__YT_HOVER_LOCK_LOCKED__) {
+        unlockPreview();
+      }
+      if (lockBadge) {
+        lockBadge.style.display = config.showBadge ? 'flex' : 'none';
+      }
+    }
+  });
+
   let hoveredCard = null;
   let lockedCard = null;
   let lockedPreviewElement = null;

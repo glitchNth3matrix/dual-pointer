@@ -8,7 +8,9 @@ def test_default_config():
     assert config.hotkey_modifier == "alt"
     assert config.hotkey_key == "\\"
     assert config.ghost_cursor_enabled is True
-    assert config.overlay_size == 40
+    assert config.overlay_size == 44
+    assert config.mouse_side_button == "xbutton1"
+    assert config.landing_ripple is True
 
 def test_save_and_load_config():
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -10,11 +10,13 @@ from dataclasses import dataclass, asdict
 
 @dataclass
 class DualPointerConfig:
-    hotkey_modifier: str = "alt"  # e.g. "alt", "ctrl", "ctrl+alt", "none"
-    hotkey_key: str = "\\"        # e.g. "\\", "c", "f8", "space"
+    hotkey_modifier: str = "alt"      # e.g. "alt", "ctrl", "ctrl+alt", "none"
+    hotkey_key: str = "\\"            # e.g. "\\", "c", "f8", "space"
     ghost_cursor_enabled: bool = True
-    overlay_size: int = 40
+    overlay_size: int = 44
     sound_cues: bool = False
+    mouse_side_button: str = "xbutton1"  # "xbutton1" (back), "xbutton2" (forward), or "none"
+    landing_ripple: bool = True          # Visual ripple animation at cursor landing location
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -38,8 +40,10 @@ class DualPointerConfig:
                 hotkey_modifier=data.get("hotkey_modifier", "alt"),
                 hotkey_key=data.get("hotkey_key", "\\"),
                 ghost_cursor_enabled=data.get("ghost_cursor_enabled", True),
-                overlay_size=data.get("overlay_size", 40),
+                overlay_size=data.get("overlay_size", 44),
                 sound_cues=data.get("sound_cues", False),
+                mouse_side_button=data.get("mouse_side_button", "xbutton1"),
+                landing_ripple=data.get("landing_ripple", True),
             )
         except Exception:
             return cls()
