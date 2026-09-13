@@ -27,6 +27,23 @@ class ScreenBounds:
         return self.top + self.height
 
 
+def enable_dpi_awareness():
+    """Enables Windows Per-Monitor DPI Awareness v2 to ensure pixel-perfect coordinates."""
+    if sys.platform == "win32":
+        try:
+            # PROCESS_PER_MONITOR_DPI_AWARE = 2
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+
+# Initialize DPI awareness
+enable_dpi_awareness()
+
+
 def get_default_virtual_screen_bounds() -> ScreenBounds:
     """Queries Windows User32 for the combined virtual screen bounding box spanning all monitors."""
     if sys.platform == "win32":

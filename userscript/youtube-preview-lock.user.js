@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Hover Lock
 // @namespace    https://github.com/dualpointer/youtube-hover-lock
-// @version      1.2.0
-// @description  Keeps YouTube thumbnail video previews actively playing when moving mouse away, switching monitors, or clicking elsewhere.
+// @version      1.3.0
+// @description  Keeps YouTube thumbnail video previews actively playing when moving mouse away, switching monitors, or clicking elsewhere. Includes Auto-Loop and 1-click sound toggle.
 // @author       DualPointer
 // @match        *://*.youtube.com/*
 // @grant        none
@@ -71,6 +71,22 @@
         outline: 2px solid rgba(56, 189, 248, 0.8) !important;
         outline-offset: -2px;
       }
+      .yt-hover-audio-btn {
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        padding: 2px 6px;
+        font-size: 11px;
+        margin-left: 4px;
+        line-height: 1;
+        transition: all 0.2s ease;
+      }
+      .yt-hover-audio-btn:hover {
+        background: rgba(56, 189, 248, 0.5);
+        border-color: rgba(56, 189, 248, 0.9);
+      }
       ytd-video-preview.yt-hover-locked-active,
       ytd-video-preview.yt-hover-locked-active #inline-preview-player,
       ytd-video-preview.yt-hover-locked-active #player-container {
@@ -93,7 +109,7 @@
         (lockedCard && lockedCard.contains(this));
 
       if (isPreview) {
-        return; // Prevent pause while locked!
+        return;
       }
     }
     return originalPause.apply(this, arguments);
@@ -181,10 +197,28 @@
       lockBadge.className = 'yt-hover-lock-badge';
       lockBadge.innerHTML = `
         <span class="yt-hover-lock-icon"></span>
-        <span>Locked</span>
+        <span id="yt-hover-lock-text">Locked</span>
+        <button class="yt-hover-audio-btn" id="yt-hover-audio-toggle" title="Toggle audio (Mute/Unmute)">🔇</button>
       `;
-      lockBadge.title = 'Preview is locked! Playing continuously across monitors. Click or press Alt+P to unlock.';
+      lockBadge.title = 'Preview is locked! Playing continuously across monitors. Click text to unlock, or button for sound.';
       lockBadge.addEventListener('click', (e) => {
+        if (e.target.closest('#yt-hover-audio-toggle')) {
+          e.stopPropagation();
+          const preview =
+            lockedPreviewElement ||
+            document.querySelector('#video-preview') ||
+            document.querySelector('ytd-video-preview');
+          if (preview) {
+            const video = preview.querySelector('video');
+            if (video) {
+              video.muted = !video.muted;
+              video.volume = 1.0;
+              const btn = lockBadge.querySelector('#yt-hover-audio-toggle');
+              if (btn) btn.textContent = video.muted ? '🔇' : '🔊';
+            }
+          }
+          return;
+        }
         e.stopPropagation();
         unlockPreview();
       });
@@ -216,8 +250,13 @@
           preview.style.display = 'block';
         }
         const video = preview.querySelector('video');
-        if (video && video.paused && !video.ended) {
-          video.play().catch(() => {});
+        if (video) {
+          if (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4)) {
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          } else if (video.paused) {
+            video.play().catch(() => {});
+          }
         }
       }
     });
@@ -239,8 +278,18 @@
 
       if (preview) {
         const video = preview.querySelector('video');
-        if (video && video.paused && !video.ended) {
-          video.play().catch(() => {});
+        if (video) {
+          if (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4)) {
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          } else if (video.paused) {
+            video.play().catch(() => {});
+          }
+
+          const btn = lockBadge && lockBadge.querySelector('#yt-hover-audio-toggle');
+          if (btn) {
+            btn.textContent = video.muted ? '🔇' : '🔊';
+          }
         }
       }
     }, 250);

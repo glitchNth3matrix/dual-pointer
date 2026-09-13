@@ -68,6 +68,22 @@
         outline: 2px solid rgba(56, 189, 248, 0.8) !important;
         outline-offset: -2px;
       }
+      .yt-hover-audio-btn {
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        padding: 2px 6px;
+        font-size: 11px;
+        margin-left: 4px;
+        line-height: 1;
+        transition: all 0.2s ease;
+      }
+      .yt-hover-audio-btn:hover {
+        background: rgba(56, 189, 248, 0.5);
+        border-color: rgba(56, 189, 248, 0.9);
+      }
       /* Prevent preview player from being visually collapsed or hidden while locked */
       ytd-video-preview.yt-hover-locked-active,
       ytd-video-preview.yt-hover-locked-active #inline-preview-player,
@@ -186,16 +202,34 @@
       lockedPreviewElement.classList.add('yt-hover-locked-active');
     }
 
-    // Attach visual lock badge
+    // Attach visual lock badge with sound toggle
     if (!lockBadge) {
       lockBadge = document.createElement('div');
       lockBadge.className = 'yt-hover-lock-badge';
       lockBadge.innerHTML = `
         <span class="yt-hover-lock-icon"></span>
-        <span>Locked</span>
+        <span id="yt-hover-lock-text">Locked</span>
+        <button class="yt-hover-audio-btn" id="yt-hover-audio-toggle" title="Toggle audio (Mute/Unmute)">🔇</button>
       `;
-      lockBadge.title = 'Preview is locked! Playing continuously across monitors. Click or press Alt+P to unlock.';
+      lockBadge.title = 'Preview is locked! Playing continuously across monitors. Click text to unlock, or button for sound.';
       lockBadge.addEventListener('click', (e) => {
+        if (e.target.closest('#yt-hover-audio-toggle')) {
+          e.stopPropagation();
+          const preview =
+            lockedPreviewElement ||
+            document.querySelector('#video-preview') ||
+            document.querySelector('ytd-video-preview');
+          if (preview) {
+            const video = preview.querySelector('video');
+            if (video) {
+              video.muted = !video.muted;
+              video.volume = 1.0;
+              const btn = lockBadge.querySelector('#yt-hover-audio-toggle');
+              if (btn) btn.textContent = video.muted ? '🔇' : '🔊';
+            }
+          }
+          return;
+        }
         e.stopPropagation();
         unlockPreview();
       });
@@ -228,8 +262,13 @@
           preview.style.display = 'block';
         }
         const video = preview.querySelector('video');
-        if (video && video.paused && !video.ended) {
-          video.play().catch(() => {});
+        if (video) {
+          if (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4)) {
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          } else if (video.paused) {
+            video.play().catch(() => {});
+          }
         }
       }
     });
@@ -240,7 +279,7 @@
       attributeFilter: ['hidden', 'style', 'class']
     });
 
-    // Heartbeat to keep video actively playing
+    // Heartbeat to keep video actively playing and looping
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = setInterval(() => {
       if (!window.__YT_HOVER_LOCK_LOCKED__) return;
@@ -252,13 +291,24 @@
 
       if (preview) {
         const video = preview.querySelector('video');
-        if (video && video.paused && !video.ended) {
-          video.play().catch(() => {});
+        if (video) {
+          if (video.ended || (video.duration > 0 && video.currentTime >= video.duration - 0.4)) {
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          } else if (video.paused) {
+            video.play().catch(() => {});
+          }
+
+          // Sync audio button state
+          const btn = lockBadge && lockBadge.querySelector('#yt-hover-audio-toggle');
+          if (btn) {
+            btn.textContent = video.muted ? '🔇' : '🔊';
+          }
         }
       }
     }, 250);
 
-    console.log('[YouTube Hover Lock] Preview locked. Protected against blur and mouseleave.');
+    console.log('[YouTube Hover Lock] Preview locked with Auto-Loop and Audio control.');
   }
 
   function unlockPreview() {

@@ -24,6 +24,7 @@ try:
     )
     from desktop.ghost_overlay import GhostOverlay
     from desktop.hotkey_manager import HotkeyManager
+    from desktop.autostart import is_autostart_enabled, set_autostart
 except ImportError:
     from config import DualPointerConfig
     from cursor_manager import (
@@ -33,6 +34,7 @@ except ImportError:
     )
     from ghost_overlay import GhostOverlay
     from hotkey_manager import HotkeyManager
+    from autostart import is_autostart_enabled, set_autostart
 
 CONFIG_FILE = os.path.expanduser("~/.dualpointer_config.json")
 
@@ -126,6 +128,10 @@ class DualPointerApp:
         parked_pos = self.cursor_manager.inactive_slot_pos
         self.ghost_overlay.show(parked_pos[0], parked_pos[1], self.cursor_manager.inactive_slot)
 
+    def toggle_autostart(self, item=None):
+        current = is_autostart_enabled()
+        set_autostart(not current)
+
     def quit_app(self, item=None):
         self.ghost_overlay.stop()
         self.hotkey_manager.stop()
@@ -159,6 +165,11 @@ class DualPointerApp:
                     "Show Parked Ghost Pointer",
                     self.toggle_ghost_overlay,
                     checked=lambda item: self.config.ghost_cursor_enabled,
+                ),
+                item(
+                    "Start with Windows",
+                    self.toggle_autostart,
+                    checked=lambda item: is_autostart_enabled(),
                 ),
                 item(
                     "Audio Click Feedback",
